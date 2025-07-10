@@ -1,4 +1,8 @@
 import io
+import os
+import tempfile
+import uuid
+import time
 import cv2
 import numpy as np
 from PIL import Image
@@ -143,3 +147,89 @@ def calculate_processing_stats(start_time: float, end_time: float) -> dict:
         "processing_time": round(processing_time, 3),
         "fps_potential": round(1 / processing_time, 2) if processing_time > 0 else 0
     }
+
+
+def validate_video_file_type(filename: Optional[str]) -> bool:
+    """
+    Validate if the uploaded file is an allowed video type
+    
+    Args:
+        filename: Name of the uploaded file
+        
+    Returns:
+        True if file type is allowed, False otherwise
+    """
+    if not filename:
+        return False
+    
+    allowed_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv'}
+    file_extension = filename.lower().split('.')[-1]
+    
+    return f'.{file_extension}' in allowed_extensions
+
+
+def save_temp_video(file_content: bytes, filename: str) -> Optional[str]:
+    """
+    Save uploaded video content to a temporary file
+    
+    Args:
+        file_content: Raw video file bytes
+        filename: Original filename
+        
+    Returns:
+        Path to temporary file or None if failed
+    """
+    try:
+        # Create temporary directory if it doesn't exist
+        temp_dir = tempfile.gettempdir()
+        
+        # Generate unique filename
+        file_extension = filename.lower().split('.')[-1] if '.' in filename else 'mp4'
+        temp_filename = f"video_{uuid.uuid4().hex}.{file_extension}"
+        temp_path = os.path.join(temp_dir, temp_filename)
+        
+        # Write file content
+        with open(temp_path, 'wb') as temp_file:
+            temp_file.write(file_content)
+        
+        return temp_path
+        
+    except Exception as e:
+        print(f"Error saving temporary video: {e}")
+        return None
+
+
+def cleanup_temp_file(file_path: str) -> None:
+    """
+    Clean up temporary file
+    
+    Args:
+        file_path: Path to the temporary file to delete
+    """
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        print(f"Error cleaning up temporary file {file_path}: {e}")
+
+
+def log_video_analysis_result(result: dict, processing_time: float) -> None:
+    """
+    Log the video analysis result for monitoring and debugging
+    
+    Args:
+        result: Video analysis result dictionary
+        processing_time: Time taken to process the video
+    """
+    try:
+        activity = result.get("activity_detected", "unknown")
+        score = result.get("overall_posture_score", 0)
+        total_frames = result.get("total_frames", 0)
+        analyzed_frames = result.get("analyzed_frames", 0)
+        
+        print(f"[VIDEO ANALYSIS] Activity: {activity} | "
+              f"Score: {score:.1f}% | Frames: {analyzed_frames}/{total_frames} | "
+              f"Time: {processing_time:.3f}s")
+              
+    except Exception as e:
+        print(f"Error logging video analysis result: {e}")

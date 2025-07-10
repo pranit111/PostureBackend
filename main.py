@@ -5,8 +5,8 @@ import time
 import uvicorn
 from typing import Optional
 
-from models import PostureAnalysisResponse
-from posture_analyzer import PostureAnalyzer, preprocess_image, validate_image
+from models import PostureAnalysisResponse, VideoAnalysisResponse
+from posture_analyzer import PostureAnalyzer, preprocess_image, validate_image, VideoPostureAnalyzer
 from utils import (
     convert_upload_to_image,
     validate_file_type,
@@ -14,7 +14,11 @@ from utils import (
     create_error_response,
     create_success_response,
     log_analysis_result,
-    calculate_processing_stats
+    calculate_processing_stats,
+    validate_video_file_type,
+    save_temp_video,
+    cleanup_temp_file,
+    log_video_analysis_result
 )
 
 # Initialize FastAPI app
@@ -53,8 +57,16 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "analyze_frame": "/analyze/frame",
+            "analyze_frame_detailed": "/analyze/frame/detailed",
+            "analyze_video": "/analyze/video",
             "health_check": "/health",
             "stats": "/stats"
+        },
+        "video_analysis_features": {
+            "supported_formats": ["MP4", "AVI", "MOV"],
+            "max_file_size": "50MB",
+            "activities_detected": ["squat", "sitting", "standing", "walking"],
+            "feedback_types": ["per_frame", "activity_specific", "summary"]
         }
     }
 
@@ -265,6 +277,101 @@ async def analyze_frame_detailed(file: UploadFile = File(...)):
             status_code=500,
             content=create_error_response(
                 "Internal server error during detailed analysis.",
+                "INTERNAL_ERROR"
+            )
+        )
+
+
+@app.post("/analyze/video", response_model=VideoAnalysisResponse)
+async def analyze_video(file: UploadFile = File(...)):
+    """
+    Analyze a video file for posture detection and activity recognition
+    
+    Args:
+        file: Uploaded video file (MP4, AVI, MOV)
+        
+    Returns:
+        VideoAnalysisResponse with complete video analysis
+    """
+    start_time = time.time()
+    processing_stats["total_requests"] += 1
+    
+    try:
+        # Validate file type for video
+        if not validate_video_file_type(file.filename):
+            processing_stats["failed_analyses"] += 1
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported video file type. Please upload MP4, AVI, or MOV files."
+            )
+        
+        # Read file content
+        file_content = await file.read()
+        
+        # Validate file size (50MB limit for videos)
+        if not validate_file_size(len(file_content), max_size_mb=50):
+            processing_stats["failed_analyses"] += 1
+            raise HTTPException(
+                status_code=400,
+                detail="Video file too large. Maximum size is 50MB."
+            )
+        
+        # Save temporary video file
+        temp_video_path = save_temp_video(file_content, file.filename)
+        if not temp_video_path:
+            processing_stats["failed_analyses"] += 1
+            return JSONResponse(
+                status_code=422,
+                content=create_error_response(
+                    "Failed to process video file.",
+                    "VIDEO_PROCESSING_ERROR"
+                )
+            )
+        
+        # Initialize video analyzer
+        video_analyzer = VideoPostureAnalyzer()
+        
+        # Analyze video
+        analysis_result = video_analyzer.analyze_video(temp_video_path)
+        
+        # Clean up temporary file
+        cleanup_temp_file(temp_video_path)
+        
+        # Calculate processing time
+        end_time = time.time()
+        processing_time = end_time - start_time
+        
+        # Update stats
+        processing_stats["successful_analyses"] += 1
+        processing_stats["average_processing_time"] = (
+            (processing_stats["average_processing_time"] * (processing_stats["successful_analyses"] - 1) + processing_time) /
+            processing_stats["successful_analyses"]
+        )
+        
+        # Log result
+        log_video_analysis_result(analysis_result, processing_time)
+        
+        # Return response
+        return VideoAnalysisResponse(
+            activity_detected=analysis_result["activity_detected"],
+            overall_posture_score=analysis_result["overall_posture_score"],
+            frame_analyses=analysis_result["frame_analyses"],
+            activity_specific_feedback=analysis_result["activity_specific_feedback"],
+            summary=analysis_result["summary"],
+            processing_time=processing_time,
+            total_frames=analysis_result["total_frames"],
+            analyzed_frames=analysis_result["analyzed_frames"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        processing_stats["failed_analyses"] += 1
+        print(f"Unexpected error in analyze_video: {e}")
+        return JSONResponse(
+            status_code=500,
+            content=create_error_response(
+                "Internal server error during video analysis.",
                 "INTERNAL_ERROR"
             )
         )

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 # Just JSON response models, for returing responses from FastAPI endpoints
 
 class PostureAnalysisRequest(BaseModel):
@@ -39,6 +39,55 @@ class PostureAnalysisResponse(BaseModel):
     
     class Config:
         populate_by_name = True
+
+
+class FrameAnalysis(BaseModel):
+    """Analysis result for a single video frame"""
+    frame_number: int
+    timestamp: float
+    bad_posture: bool
+    back_angle: Optional[float] = None
+    posture_status: str
+    activity_specific_issues: List[str] = []
+    suggestions: List[str] = []
+
+
+class ActivityFeedback(BaseModel):
+    """Activity-specific posture feedback"""
+    activity: str
+    total_frames: int
+    poor_posture_frames: int
+    common_issues: List[str]
+    improvement_suggestions: List[str]
+    specific_metrics: Dict[str, float] = {}
+
+
+class VideoAnalysisResponse(BaseModel):
+    """Response model for video posture analysis"""
+    activity_detected: str = Field(
+        description="Detected activity in the video (squat, sitting, walking, etc.)"
+    )
+    overall_posture_score: float = Field(
+        description="Overall posture score for the entire video (0-100)"
+    )
+    frame_analyses: List[FrameAnalysis] = Field(
+        description="Analysis results for sampled frames"
+    )
+    activity_specific_feedback: ActivityFeedback = Field(
+        description="Feedback specific to the detected activity"
+    )
+    summary: Dict[str, Any] = Field(
+        description="Summary statistics and recommendations"
+    )
+    processing_time: float = Field(
+        description="Time taken to process the video"
+    )
+    total_frames: int = Field(
+        description="Total number of frames in the video"
+    )
+    analyzed_frames: int = Field(
+        description="Number of frames that were analyzed"
+    )
 
 
 class PostureMetrics(BaseModel):
